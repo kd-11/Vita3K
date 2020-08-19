@@ -21,7 +21,6 @@
 #include <cstring>
 
 #include <gxm/types.h>
-#pragma optimize("", off)
 
 namespace renderer::texture {
 
