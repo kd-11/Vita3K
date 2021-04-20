@@ -139,7 +139,7 @@ static size_t decompress_compressed_swizz_texture(SceGxmTextureBaseFormat fmt, v
  *
  * \return Void.
  */
-void decompress_packed_float_e5m9m9m9(SceGxmTextureBaseFormat fmt, void *dest, const void *data, const uint32_t width, const uint32_t height) {
+static void decompress_packed_float_e5m9m9m9(SceGxmTextureBaseFormat fmt, void *dest, const void *data, const uint32_t width, const uint32_t height) {
     const uint32_t *in = reinterpret_cast<const uint32_t *>(data);
     uint16_t *out = reinterpret_cast<uint16_t *>(dest);
 
@@ -150,6 +150,24 @@ void decompress_packed_float_e5m9m9m9(SceGxmTextureBaseFormat fmt, void *dest, c
         out[out_offset++] = exponent | ((packed & (0x1FF << 18)) >> 17);
         out[out_offset++] = exponent | ((packed & (0x1FF << 9)) >> 8);
         out[out_offset++] = exponent | ((packed & 0x1FF) << 1);
+    }
+}
+
+static void convert_x8u24_to_u24x8(void* dest, const void* data, const uint32_t width, const uint32_t height, const size_t row_length_in_pixels)
+{
+    auto dst = static_cast<uint32_t*>(dest);
+    auto src = static_cast<const uint32_t*>(data);
+
+    for (uint32_t row = 0; row < height; ++row)
+    {
+        for (uint32_t col = 0; col < width; ++col)
+        {
+            const uint32_t src_value = src[col];
+            const uint32_t value = (src_value << 8) | (src_value >> 24);
+            *dst++ = value;
+        }
+
+        src += row_length_in_pixels;
     }
 }
 
@@ -230,11 +248,6 @@ void upload_bound_texture(const SceGxmTexture &gxm_texture, const MemState &mem)
             case SCE_GXM_TEXTURE_BASE_FORMAT_PVRTII2BPP:
             case SCE_GXM_TEXTURE_BASE_FORMAT_PVRTII4BPP:
                 break;
-            case SCE_GXM_TEXTURE_BASE_FORMAT_SE5M9M9M9:
-                texture_data_decompressed.resize(width * height * 6);
-                decompress_packed_float_e5m9m9m9(base_format, texture_data_decompressed.data(), pixels, width, height);
-                pixels = texture_data_decompressed.data();
-                break;
             default:
                 // Convert data
                 texture_pixels_lineared.resize(width * height * bytes_per_pixel);
@@ -310,6 +323,28 @@ void upload_bound_texture(const SceGxmTexture &gxm_texture, const MemState &mem)
                 assert(false);
             default:
                 assert(false);
+            }
+        }
+        else
+        {
+            switch (fmt)
+            {
+            case SCE_GXM_TEXTURE_FORMAT_SE5M9M9M9_BGR:
+            case SCE_GXM_TEXTURE_FORMAT_SE5M9M9M9_RGB:
+                texture_data_decompressed.resize(width * height * 6);
+                decompress_packed_float_e5m9m9m9(base_format, texture_data_decompressed.data(), pixels, width, height);
+                pixels = texture_data_decompressed.data();
+                pixels_per_stride = 0;
+                break;
+            case SCE_GXM_TEXTURE_FORMAT_X8U24_SD:
+                // X8 = [24-31], D24 = [0-23], technically this is GL_UNSIGNED_INT_24_8_REV which does not exist
+                // TODO: Requires shader to convert the normalized value read by GL to unsigned int. Just multiply by 2^24-1 when reading and you're done.
+                texture_data_decompressed.resize(width * height * 4);
+                convert_x8u24_to_u24x8(texture_data_decompressed.data(), pixels, width, height, pixels_per_stride);
+                pixels = texture_data_decompressed.data();
+                pixels_per_stride = 0;
+            default:
+                break;
             }
         }
 
